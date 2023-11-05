@@ -202,26 +202,68 @@ class OverNightStrategy:
         self.cum_returns = cum_returns
         self.portfolio = stocks_chosen
 
-
     def plot_performance(self, compare_to_spy=True, log=True, start_date=None):
         if not hasattr(self, "cum_returns"):
             print("No portfolio calculated yet. Call .compute_portfolio()")
             return
+
+        fig = plt.figure(figsize=(14, 10))
+        ax1 = plt.subplot2grid((10, 10), (0, 0), colspan=6, rowspan=6)
+        ax2 = plt.subplot2grid((10, 10), (6, 0), colspan=6, rowspan=4)
+        ax3 = plt.subplot2grid((10, 10), (0, 6), rowspan=10, colspan=4)
+        plt.suptitle(f"Total afkast, natteeffekt, {self.number_of_stocks_in_portfolio} aktier")
+
+        # Plot cumulative returns on the primary y-axis (ax1)
         if start_date:
             closest_date = self.cum_returns.index[self.cum_returns.index.get_indexer([start_date], method="nearest")[0]]
-            plt.plot(self.cum_returns.loc[closest_date:]/self.cum_returns.loc[closest_date], label="Natteeffekt strategi")
+            ax1.plot(self.cum_returns.loc[closest_date:] / self.cum_returns.loc[closest_date],
+                     label="Natteeffekt strategi")
         else:
-            plt.plot(self.cum_returns, label="Natteeffekt strategi")
+            ax1.plot(self.cum_returns, label="Natteeffekt strategi")
+
         if compare_to_spy:
             spx_compare = yf.download('SPY', start=self.cum_returns.iloc[1].name, progress=False)
             if start_date:
                 spx_compare = spx_compare.loc[closest_date:]
-            plt.plot(spx_compare['Close'] / spx_compare['Close'].iloc[0], label="S&P 500")
-        plt.title(f"Total afkast, natteeffekt, {self.number_of_stocks_in_portfolio} aktier")
+            ax1.plot(spx_compare['Close'] / spx_compare['Close'].iloc[0], label="S&P 500")
+
+        # Plot drawdown on the bottom subplot (ax2)
+        if start_date:
+            drawdown = -(1 - self.cum_returns.loc[closest_date:] / self.cum_returns.loc[closest_date:].cummax())*100
+        else:
+            drawdown = -(1 - self.cum_returns / self.cum_returns.cummax())*100
+
+        ax2.fill_between(drawdown.index, 0, drawdown.values.flatten(), color='red', alpha=0.3)
+
+        # Histogram
+        if start_date:
+            data = self.cum_returns.loc[closest_date:].pct_change().dropna().values
+        else:
+            data = self.cum_returns.pct_change().dropna().values
+
+        # Define the percentiles for the range (10th and 90th percentiles)
+        percentile_10 = np.percentile(data, 0.5)
+        percentile_90 = np.percentile(data, 99.5)
+
+        # Create custom bin edges that cover the desired range
+        bin_edges = np.linspace(percentile_10, percentile_90,
+                                num=min(35, int(len(data) / 4)))  # Adjust the number of bins as needed
+
+        # Create a histogram with density=True to get the density values and bin edges
+        ax3.hist(data, bins=bin_edges)
+
+
         if log:
-            plt.yscale('log')
-        plt.grid(True)
-        plt.legend()
+            ax1.set_yscale('log')
+
+        # Set labels and legends for both y-axes
+        ax1.set_ylabel("Cumulative Returns")
+        ax2.set_ylabel("Drawdown (%)")
+        ax1.legend(loc='upper left')
+
+        ax1.grid(True)
+        ax2.grid(True)
+        plt.tight_layout()
         plt.show()
 
     def compute_portfolio_stats(self, print_stats=False):
