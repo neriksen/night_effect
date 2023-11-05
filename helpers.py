@@ -197,24 +197,31 @@ class OverNightStrategy:
         # The index begins one period later, as we dont have a return when buying the portfolio the first day
         cum_returns = pd.DataFrame(portfolio_returns, index=self.signal_df.iloc[1:].index).cumprod()
         cum_returns = cum_returns / cum_returns.iloc[0, :]
+        cum_returns.index = pd.to_datetime(cum_returns.index)
 
         self.cum_returns = cum_returns
         self.portfolio = stocks_chosen
 
 
-    def plot_performance(self, compare_to_spy=True, log=True):
+    def plot_performance(self, compare_to_spy=True, log=True, start_date=None):
         if not hasattr(self, "cum_returns"):
             print("No portfolio calculated yet. Call .compute_portfolio()")
             return
-
-        plt.plot(self.cum_returns)
+        if start_date:
+            closest_date = self.cum_returns.index[self.cum_returns.index.get_indexer([start_date], method="nearest")[0]]
+            plt.plot(self.cum_returns.loc[closest_date:]/self.cum_returns.loc[closest_date], label="Natteeffekt strategi")
+        else:
+            plt.plot(self.cum_returns, label="Natteeffekt strategi")
         if compare_to_spy:
             spx_compare = yf.download('SPY', start=self.cum_returns.iloc[1].name, progress=False)
-            plt.plot(spx_compare['Close'] / spx_compare['Close'].iloc[0])
+            if start_date:
+                spx_compare = spx_compare.loc[closest_date:]
+            plt.plot(spx_compare['Close'] / spx_compare['Close'].iloc[0], label="S&P 500")
         plt.title(f"Total afkast, natteeffekt, {self.number_of_stocks_in_portfolio} aktier")
         if log:
             plt.yscale('log')
         plt.grid(True)
+        plt.legend()
         plt.show()
 
     def compute_portfolio_stats(self, print_stats=False):
@@ -243,7 +250,8 @@ if __name__ == '__main__':
     tickers = get_tickers_with_market_cap_limit(0.95, 1)
     strat1 = OverNightStrategy(tickers)
     start = time.time()
-    strat1.compute_portfolio(3, portfolio_weight_type=None)
+    strat1.compute_portfolio(3, portfolio_weight_type="skewed")
     end = time.time()
     print(f"Time took: {end-start}")
+    strat1.plot_performance(start_date=dt.date(2023, 1, 1))
 
