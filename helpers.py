@@ -46,16 +46,13 @@ def get_tickers_with_market_cap_limit(lower_percentile, upper_percentile):
     assert 0 <= upper_percentile <= 1
     assert lower_percentile < upper_percentile
     tickers = pd.read_csv("tickers.csv", sep=";", index_col=0)
-    tickers['Volume'] = tickers['Volume'].apply(parse_millions_and_billions)
-    tickers['Avg Vol (3 month)'] = tickers['Avg Vol (3 month)'].apply(parse_millions_and_billions)
-    tickers['Market Cap'] = tickers['Market Cap'].apply(parse_millions_and_billions)
 
     # Calculate the percentiles
-    lower_percentile = tickers['Market Cap'].quantile(lower_percentile)
-    upper_percentile = tickers['Market Cap'].quantile(upper_percentile)
+    lower_percentile = tickers['marketCap'].quantile(lower_percentile)
+    upper_percentile = tickers['marketCap'].quantile(upper_percentile)
 
     # Filter the DataFrame based on the percentile range
-    tickers = tickers[(tickers['Market Cap'] >= lower_percentile) & (tickers['Market Cap'] <= upper_percentile)]
+    tickers = tickers[(tickers['marketCap'] >= lower_percentile) & (tickers['marketCap'] <= upper_percentile)]
     return tuple(tickers.index.values)
 
 
