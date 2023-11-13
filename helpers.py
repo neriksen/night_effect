@@ -4,8 +4,11 @@ import datetime as dt
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from pandas.plotting import table
 import yfinance as yf
 from functools import lru_cache
+import calendar
+
 
 
 def find_latest_business_day():
@@ -129,6 +132,7 @@ def daysession_return(df):
 
 class OverNightStrategy:
     def __init__(self, tickers, signal_sample_period_days=10, skew_factor=10, fee_pr_day=0.001):
+        self.monthly_returns = None
         self.tickers = tickers
         self.overnight_df = calculate_night_effect_of_tickers(tickers=self.tickers)
         self.signal_df = self.compute_signal(signal_sample_period_days)
@@ -204,10 +208,11 @@ class OverNightStrategy:
             print("No portfolio calculated yet. Call .compute_portfolio()")
             return
 
-        fig = plt.figure(figsize=(14, 10))
-        ax1 = plt.subplot2grid((10, 10), (0, 0), colspan=6, rowspan=6)
-        ax2 = plt.subplot2grid((10, 10), (6, 0), colspan=6, rowspan=4)
-        ax3 = plt.subplot2grid((10, 10), (0, 6), rowspan=10, colspan=4)
+        fig = plt.figure(figsize=(17, 10), dpi=200)
+        ax1 = plt.subplot2grid((15, 10), (0, 0), rowspan=6, colspan=6)
+        ax2 = plt.subplot2grid((15, 10), (6, 0), rowspan=4, colspan=6)
+        ax3 = plt.subplot2grid((15, 10), (0, 6), rowspan=10, colspan=4)
+        ax4 = plt.subplot2grid((15, 10), (10, 0), rowspan=6, colspan=5)  # New subplot for heatmap
         plt.suptitle(f"Total afkast, natteeffekt, {self.number_of_stocks_in_portfolio} aktier")
 
         # Plot cumulative returns on the primary y-axis (ax1)
@@ -238,17 +243,38 @@ class OverNightStrategy:
         else:
             data = self.cum_returns.pct_change().dropna().values
 
-        # Define the percentiles for the range (10th and 90th percentiles)
-        percentile_10 = np.percentile(data, 0.5)
-        percentile_90 = np.percentile(data, 99.5)
-
-        # Create custom bin edges that cover the desired range
-        bin_edges = np.linspace(percentile_10, percentile_90,
-                                num=min(35, int(len(data) / 4)))  # Adjust the number of bins as needed
-
         # Create a histogram with density=True to get the density values and bin edges
-        ax3.hist(data, bins=bin_edges)
+        ax3.hist(data, bins=32, edgecolor='black', range=(-0.04, 0.04))
+        ax3.axvline(x=0.0, color='red', linestyle='--', linewidth=2)
 
+        # Create a pivot table
+        if start_date:
+            data = self.cum_returns.loc[closest_date:]
+        else:
+            data = self.cum_returns
+
+        df_resampled = data.resample("M").last().pct_change().iloc[1:].multiply(100)
+        df_resampled.columns = ['Monthly returns']
+        df_resampled['Year'] = df_resampled.index.year
+        df_resampled['Month'] = df_resampled.index.month
+
+        pivot_table = pd.pivot_table(df_resampled, values='Monthly returns', index='Year', columns='Month',
+                                     aggfunc='first')
+
+        pivot_table = pivot_table.sort_index(ascending=False)
+        pivot_table = pivot_table.applymap(lambda x: f'{x:.1f}')
+        self.monthly_returns = pivot_table
+
+        # Create a table (pivot table) on ax4
+        tab = ax4.table(cellText=pivot_table.values,
+                        rowLabels=pivot_table.index,
+                        colLabels = [calendar.month_abbr[i] for i in pivot_table.columns],  # Use month abbreviations
+                        loc='center',
+                        colWidths=[0.1] * len(pivot_table.columns))
+        ax4.axis('off')
+
+        # Style the table
+        tab.auto_set_font_size(True)
 
         if log:
             ax1.set_yscale('log')
@@ -256,10 +282,12 @@ class OverNightStrategy:
         # Set labels and legends for both y-axes
         ax1.set_ylabel("Cumulative Returns")
         ax2.set_ylabel("Drawdown (%)")
+        ax3.set_ylabel("Antal observationer")
         ax1.legend(loc='upper left')
 
         ax1.grid(True)
         ax2.grid(True)
+        ax3.grid(True)
         plt.tight_layout()
         plt.show()
 
