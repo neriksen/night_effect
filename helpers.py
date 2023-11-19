@@ -155,23 +155,37 @@ def daysession_return(df):
 
 
 class OverNightStrategy:
-    def __init__(self, tickers, signal_sample_period_days=10, skew_factor=10, fee_pr_day=0.001):
+    def __init__(self, tickers, signal_sample_period_days=10, exp_signal=False,
+                 alpha=0.5, skew_factor=10, fee_pr_day=0.001):
+        self.number_of_stocks_in_portfolio = None
+        self.beta = None
+        self.ann_return = None
+        self.ann_std = None
+        self.sharpe = None
+        self.weights_arr = None
         self.monthly_returns = None
         self.tickers = tickers
         self.overnight_df = calculate_night_effect_of_tickers(tickers=self.tickers)
-        self.signal_df = self.compute_signal(signal_sample_period_days)
+        self.signal_df = self.compute_signal(sample_period=signal_sample_period_days, exp=exp_signal, alpha=alpha)
         self.skew_factor = skew_factor
         self.fee_pr_day = fee_pr_day
 
 
-    def compute_signal(self, sample_period=1000):
+    def compute_signal(self, sample_period=1000, exp=False, alpha=None):
         # Remember the return on say Tuesday Nov 3rd 2023, is the return
         # you get from buying at closing auction on Nov 2nd and
         # selling again at open on Nov 3rd. So, date X in this df will only
         # contain information from date 0 to X and crucially not 0 to X+1
-        return self.overnight_df.rolling(sample_period, min_periods=sample_period).mean().dropna(axis=1,
-                                                                                                           how="all").dropna(
-            axis=0, how="all")
+        if exp:
+            if not alpha:
+                print("Alpha not provided! Aborting!")
+                exit(-1)
+            assert alpha > 0 and alpha < 1
+            signal = self.overnight_df.ewm(alpha=alpha, min_periods=sample_period).mean()
+        else:
+            signal = self.overnight_df.rolling(window=sample_period, min_periods=sample_period).mean()
+        clean_signal = signal.dropna(axis=1, how="all").dropna(axis=0, how="all")
+        return clean_signal
 
     def compute_portfolio(self, number_of_stocks_in_portfolio, portfolio_weight_type=None):
         self.number_of_stocks_in_portfolio = number_of_stocks_in_portfolio
