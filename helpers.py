@@ -1,10 +1,10 @@
 import os
 import time
+from collections import Counter
 import datetime as dt
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from pandas.plotting import table
 import yfinance as yf
 from functools import lru_cache
 import calendar
@@ -203,32 +203,46 @@ class OverNightStrategy:
         self.cum_returns = cum_returns
         self.portfolio = stocks_chosen
 
-    def plot_performance(self, compare_to_spy=True, log=True, start_date=None):
+
+    def plot_performance(self, compare_to_index=True, log=True, start_date=None):
         if not hasattr(self, "cum_returns"):
             print("No portfolio calculated yet. Call .compute_portfolio()")
             return
 
-        fig = plt.figure(figsize=(17, 10), dpi=200)
-        ax1 = plt.subplot2grid((15, 10), (0, 0), rowspan=6, colspan=6)
-        ax2 = plt.subplot2grid((15, 10), (6, 0), rowspan=4, colspan=6)
-        ax3 = plt.subplot2grid((15, 10), (0, 6), rowspan=10, colspan=4)
-        ax4 = plt.subplot2grid((15, 10), (10, 0), rowspan=6, colspan=5)  # New subplot for heatmap
-        plt.suptitle(f"Total afkast, natteeffekt, {self.number_of_stocks_in_portfolio} aktier")
+        fig = plt.figure(figsize=(15, 10), dpi=200)
+        ax1 = plt.subplot2grid((15, 10), (0, 0), rowspan=6, colspan=6)  # Cum return
+        ax2 = plt.subplot2grid((15, 10), (6, 0), rowspan=4, colspan=6)  # Drawdown
+        ax3 = plt.subplot2grid((15, 10), (0, 6), rowspan=6, colspan=4)  # Histogram
+        ax4 = plt.subplot2grid((15, 10), (10, 0), rowspan=5, colspan=6) # Monthly returns
+        ax5 = plt.subplot2grid((15, 10), (10, 6), rowspan=5, colspan=4) # Most common stocks
+        ax6 = plt.subplot2grid((15, 10), (6, 6), rowspan=4, colspan=4)  # 1y return
+        plt.suptitle(f"Total return, night-effect strategy")
+
+        # Initialize closest date:
+        closest_date = self.cum_returns.index[0]
+
 
         # Plot cumulative returns on the primary y-axis (ax1)
         if start_date:
-            closest_date = self.cum_returns.index[self.cum_returns.index.get_indexer([start_date], method="nearest")[0]]
+            closest_date = self.cum_returns.index[self.cum_returns.index.get_indexer([start_date], method="bfill")[0]]
             ax1.plot(self.cum_returns.loc[closest_date:] / self.cum_returns.loc[closest_date],
-                     label="Natteeffekt strategi")
+                     label="Night-effect strategy")
         else:
-            ax1.plot(self.cum_returns, label="Natteeffekt strategi")
+            ax1.plot(self.cum_returns, label="Night-effect strategy", color="black")
 
-        if compare_to_spy:
-            spx_compare = yf.download('SPY', start=self.cum_returns.iloc[1].name, progress=False)
+        if compare_to_index:
+            index_name = '^OMX'
+            spx_compare = find_data('^OMX', find_latest_business_day())
+            start_date = self.cum_returns.iloc[1].name
+            spx_compare = spx_compare.loc[start_date:]
             if start_date:
+                spx_compare = spx_compare.ffill()
                 spx_compare = spx_compare.loc[closest_date:]
-            ax1.plot(spx_compare['Close'] / spx_compare['Close'].iloc[0], label="S&P 500")
-
+            try:
+                ax1.plot(spx_compare['Close'] / spx_compare['Close'].iloc[0], label="OMX Stockholm",
+                     color="red", alpha=0.8)
+            except IndexError:
+                print(f"Warning: {index_name} failed to download! No comparison on chart")
         # Plot drawdown on the bottom subplot (ax2)
         if start_date:
             drawdown = -(1 - self.cum_returns.loc[closest_date:] / self.cum_returns.loc[closest_date:].cummax())*100
@@ -247,34 +261,64 @@ class OverNightStrategy:
         ax3.hist(data, bins=32, edgecolor='black', range=(-0.04, 0.04))
         ax3.axvline(x=0.0, color='red', linestyle='--', linewidth=2)
 
+        # 1 year total return plot
+        ax6.plot(self.cum_returns.pct_change(periods=260) * 100)
+
         # Create a pivot table
         if start_date:
             data = self.cum_returns.loc[closest_date:]
         else:
             data = self.cum_returns
+        df_month = pd.concat([data.iloc[[0]], data.resample("M").last()]).pct_change().multiply(100).iloc[1:]
+        df_year = pd.concat([data.iloc[[0]], data.resample("Y").last()]).pct_change().multiply(100).iloc[1:]
+        df_year.index = df_year.index.year
+        df_year = df_year.sort_index(ascending=False)
 
-        df_resampled = data.resample("M").last().pct_change().iloc[1:].multiply(100)
-        df_resampled.columns = ['Monthly returns']
-        df_resampled['Year'] = df_resampled.index.year
-        df_resampled['Month'] = df_resampled.index.month
+        df_month.columns = ['Monthly returns']
+        df_month['Year'] = df_month.index.year
+        df_month['Month'] = df_month.index.month
 
-        pivot_table = pd.pivot_table(df_resampled, values='Monthly returns', index='Year', columns='Month',
-                                     aggfunc='first')
+        pivot_table = pd.pivot_table(df_month, values='Monthly returns', index='Year', columns='Month',
+                                     aggfunc='first', )
 
         pivot_table = pivot_table.sort_index(ascending=False)
+        pivot_table = pd.concat([pivot_table, df_year], axis=1)
         pivot_table = pivot_table.applymap(lambda x: f'{x:.1f}')
+        pivot_table = pivot_table.replace(np.nan, "")
+        colLabels = [calendar.month_abbr[i] for i in range(pivot_table.columns[0], pivot_table.columns[-2]+1)] + ["Year"]
+
         self.monthly_returns = pivot_table
 
         # Create a table (pivot table) on ax4
         tab = ax4.table(cellText=pivot_table.values,
                         rowLabels=pivot_table.index,
-                        colLabels = [calendar.month_abbr[i] for i in pivot_table.columns],  # Use month abbreviations
-                        loc='center',
-                        colWidths=[0.1] * len(pivot_table.columns))
+                        colLabels = colLabels,
+                        loc='center')
         ax4.axis('off')
 
         # Style the table
         tab.auto_set_font_size(True)
+
+        # Text in bottom right:
+        flat_portfolio = [item for sublist in self.portfolio for item in sublist]
+        element_counts = Counter(flat_portfolio)
+
+        # Find the five most common elements
+        most_common_elements = element_counts.most_common(10)
+        common_stocks_str = "\n".join([f"{l[0]}, {round(l[1]*100/len(self.portfolio), 1)}%" for l in most_common_elements])
+
+        text_content = f"""
+        Period: {closest_date.strftime('%Y-%m-%d')} - {find_latest_business_day()}
+        Number of stocks in portfolio: {self.number_of_stocks_in_portfolio}
+        Ann. return: {self.ann_return}, Ann. std: {self.ann_std}, Sharpe: {self.sharpe}, Beta: {self.beta}
+        Assumed fee per trade: {round(self.fee_pr_day*100, 3)}%
+        Most common tickers and %total time in portfolio: \n{common_stocks_str}
+        """
+
+        ax5.text(0.0, 1.0, text_content, transform=ax5.transAxes, va="top", ha="left")
+        #ax5.text(0.05, 0.70, text_content, va="top", ha="left")
+        ax5.axis('off')
+
 
         if log:
             ax1.set_yscale('log')
@@ -282,12 +326,14 @@ class OverNightStrategy:
         # Set labels and legends for both y-axes
         ax1.set_ylabel("Cumulative Returns")
         ax2.set_ylabel("Drawdown (%)")
-        ax3.set_ylabel("Antal observationer")
+        ax3.set_ylabel("Number of observations")
+        ax6.set_ylabel("Yearly total return (%)")
         ax1.legend(loc='upper left')
 
         ax1.grid(True)
         ax2.grid(True)
         ax3.grid(True)
+        ax6.grid(True)
         plt.tight_layout()
         plt.show()
 
