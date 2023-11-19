@@ -192,9 +192,10 @@ class OverNightStrategy:
         # The idea is, given a "signal", to sort the by the best looking signal from the day before
         # and choose those best-looking stocks to be in the portfolio for tomorrow
 
-        stocks_chosen = []
-
-        portfolio_returns = np.empty((len(self.signal_df)-1, 1))
+        len_returns = len(self.signal_df) - 1
+        stocks_chosen = np.empty((len_returns, number_of_stocks_in_portfolio), dtype=object)
+        weights_arr = np.empty((len_returns, number_of_stocks_in_portfolio))
+        portfolio_returns = np.empty((len_returns, 1))
         assert number_of_stocks_in_portfolio <= len(self.signal_df.columns)
 
         # First we limit the overnight_df to start at the same time as the portfolio
@@ -202,42 +203,41 @@ class OverNightStrategy:
         limited_overnight_df = self.overnight_df.reindex(self.signal_df.index)
         overnight_arr = limited_overnight_df.values
 
-        for i, (_, row) in enumerate(self.signal_df.iterrows()):
-            if i == len(self.signal_df) - 1:
+        for i, row in enumerate(self.signal_df.values):
+            if i == len_returns:
                 break
-
-            # Drop NaNs
-            assert len(row.dropna()) >= number_of_stocks_in_portfolio    # Make sure stocks with NA returns are not included
 
             # Sort indices while keeping track of the column names
             indices_without_nan = np.where(~np.isnan(row))[0]
-            sorted_indices = indices_without_nan[np.argsort(row.values[indices_without_nan])][::-1]
+            sorted_indices = indices_without_nan[np.argsort(row[indices_without_nan])][::-1]
+            assert len(sorted_indices) >= number_of_stocks_in_portfolio
 
-            sorted_columns = row.index[sorted_indices]
+            sorted_columns = self.signal_df.columns[sorted_indices]
 
             # Append the top N stock names
-            stocks_chosen.append(list(sorted_columns[:number_of_stocks_in_portfolio].values))
+            stocks_chosen[i] = sorted_columns[:number_of_stocks_in_portfolio].values
             this_period_stock_chosen_idx = sorted_indices[:number_of_stocks_in_portfolio]
 
             # Determine portfolio weights
             if portfolio_weight_type == "skewed":
                 # We boost the signal by a factor to give some more conviction.. :)
-                signal_this_period = (row.values[this_period_stock_chosen_idx])**self.skew_factor
+                signal_this_period = (row[this_period_stock_chosen_idx]) ** self.skew_factor
                 # A simple weighting that gives more weight to stocks with a higher signal
-                weights = signal_this_period/signal_this_period.sum()
-                assert weights.sum() != 0
+                weights = signal_this_period / signal_this_period.sum()
             else:
-                weights = None
+                weights = np.array([1 / number_of_stocks_in_portfolio] * number_of_stocks_in_portfolio)
+            weights_arr[i] = weights
 
             # Calculate the portfolio return
-            next_period_returns = np.average(overnight_arr[i+1, this_period_stock_chosen_idx] - self.fee_pr_day, weights=weights)
+            next_period_returns = np.average(overnight_arr[i + 1, this_period_stock_chosen_idx] - self.fee_pr_day,
+                                             weights=weights)
             portfolio_returns[i] = next_period_returns
 
         # The index begins one period later, as we dont have a return when buying the portfolio the first day
         cum_returns = pd.DataFrame(portfolio_returns, index=self.signal_df.iloc[1:].index).cumprod()
         cum_returns = cum_returns / cum_returns.iloc[0, :]
         cum_returns.index = pd.to_datetime(cum_returns.index)
-
+        self.weights_arr = weights_arr
         self.cum_returns = cum_returns
         self.portfolio = stocks_chosen
 
