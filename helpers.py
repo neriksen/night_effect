@@ -93,7 +93,8 @@ def get_all_tickers_from_dir():
     for filename in os.listdir(directory_path):
         if os.path.isfile(os.path.join(directory_path, filename)):  # Ensure it's a file and not a directory or a symlink
             name, extension = os.path.splitext(filename)
-            filenames_without_extension.append(name.split("_")[0])
+            if name[0] != ".":
+                filenames_without_extension.append(name.split("_")[0])
     return tuple(filenames_without_extension)
 
 
