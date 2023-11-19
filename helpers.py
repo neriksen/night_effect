@@ -383,26 +383,35 @@ class OverNightStrategy:
         final_return = self.cum_returns.iloc[-1]
         num_years = len(self.cum_returns) / 260
 
-        yearly_return = (final_return ** (1 / num_years) - 1)[0]
-        yearly_std = (self.cum_returns.pct_change().std() * (250 ** 0.5))[0]
-        sharpe = yearly_return / yearly_std
+        ann_return = (final_return ** (1 / num_years) - 1)[0]
+        ann_std = (self.cum_returns.pct_change().std() * (250 ** 0.5))[0]
+        sharpe = ann_return / ann_std
+
+        x = self.cum_returns.pct_change().iloc[1:].values.flatten()
+        spx_compare = find_data('^OMX', find_latest_business_day())
+        start_date = self.cum_returns.iloc[0].name
+        spx_compare = spx_compare.loc[start_date:]
+        y = spx_compare['Close'].reindex(self.cum_returns.index).pct_change().fillna(0).iloc[1:].values.flatten()
+        correlation = np.corrcoef(x, y)[0, 1]
+
+        self.ann_return = round(ann_return*100, 1)
+        self.ann_std = round(ann_std*100, 1)
+        self.sharpe = round(sharpe, 2)
+        self.beta = round(correlation, 2)
 
         if print_stats:
-            x = self.cum_returns.pct_change().iloc[1:].values.flatten()
-            spx_compare = yf.download('SPY', start=self.cum_returns.iloc[0].name, progress=False)
-            y = spx_compare['Close'].reindex(self.cum_returns.index).pct_change().fillna(0).iloc[1:].values.flatten()
-            correlation = np.corrcoef(x, y)[0, 1]
-
-            print(f"Ann. return: {round(yearly_return*100, 1)}%, Ann. std: {round(yearly_std*100, 1)}%, Sharpe: {round(sharpe, 2)}, Beta: {round(correlation, 2)}")
-        return yearly_return, yearly_std, sharpe
+            print(f"Ann. return: {self.ann_return}%, Ann. std: {self.ann_std}%,"
+                  f" Sharpe: {self.sharpe}, Beta: {self.beta}")
+        return ann_return, ann_std, sharpe
 
 
 if __name__ == '__main__':
-    tickers = get_tickers_with_market_cap_limit(0.95, 1)
+    tickers = get_tickers_with_market_cap_limit(0.85, .89)
     strat1 = OverNightStrategy(tickers)
     start = time.time()
-    strat1.compute_portfolio(3, portfolio_weight_type="skewed")
+    strat1.compute_portfolio(5)
+    strat1.compute_portfolio_stats(print_stats=True)
     end = time.time()
     print(f"Time took: {end-start}")
-    strat1.plot_performance(start_date=dt.date(2023, 1, 1))
+    #strat1.plot_performance(start_date=dt.date(2023, 8, 1))
 
