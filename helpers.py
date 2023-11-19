@@ -62,6 +62,19 @@ def estimate_pct_of_median(ticker, trade_size_dkk=10_000):
     pct_of_median = (trade_size_dkk * 100) / median_turnover
     return pct_of_median
 
+
+@lru_cache(10000)
+def estimate_trade_cost(ticker, trade_size_dkk=10_000):
+    pct_of_median = estimate_pct_of_median(ticker, trade_size_dkk)
+    if pct_of_median >= 100:
+        # Max cost. Assumption that it costs 5% in market move
+        return 0.05
+    if pct_of_median < 0.1:
+        # Min cost. Assumption of not moving auctions at this scale
+        return 0.00001
+    return 0.001*pct_of_median
+
+
 def get_liquid_tickers(pct_median_trade_limit, trade_size):
     return ""
 
@@ -187,7 +200,7 @@ class OverNightStrategy:
         clean_signal = signal.dropna(axis=1, how="all").dropna(axis=0, how="all")
         return clean_signal
 
-    def compute_portfolio(self, number_of_stocks_in_portfolio, portfolio_weight_type=None):
+    def compute_portfolio(self, number_of_stocks_in_portfolio, portfolio_weight_type=None, trading_costly=True):
         self.number_of_stocks_in_portfolio = number_of_stocks_in_portfolio
         # The idea is, given a "signal", to sort the by the best looking signal from the day before
         # and choose those best-looking stocks to be in the portfolio for tomorrow
@@ -228,9 +241,13 @@ class OverNightStrategy:
                 weights = np.array([1 / number_of_stocks_in_portfolio] * number_of_stocks_in_portfolio)
             weights_arr[i] = weights
 
+            if trading_costly:
+                trading_costs = np.average([estimate_trade_cost(j) for j in stocks_chosen[i]], weights=weights)
+            else:
+                trading_costs = 0
             # Calculate the portfolio return
-            next_period_returns = np.average(overnight_arr[i + 1, this_period_stock_chosen_idx] - self.fee_pr_day,
-                                             weights=weights)
+            next_period_returns = np.average(overnight_arr[i + 1, this_period_stock_chosen_idx], weights=weights)
+            next_period_returns -= self.fee_pr_day+trading_costs
             portfolio_returns[i] = next_period_returns
 
         # The index begins one period later, as we dont have a return when buying the portfolio the first day
