@@ -10,7 +10,7 @@ from functools import lru_cache
 import calendar
 
 
-
+@lru_cache(10)
 def find_latest_business_day():
     today = dt.date.today()
 
@@ -25,7 +25,7 @@ def find_latest_business_day():
     latest_business_day = today - dt.timedelta(days=days_to_subtract)
     return latest_business_day
 
-
+@lru_cache(1000)
 def find_data(ticker, last_business_day):
     file_name = f"data/{ticker}_data.csv"
 
@@ -43,7 +43,30 @@ def find_data(ticker, last_business_day):
     data.to_csv(file_name)
     return data
 
+@lru_cache(1000)
+def fetch_turnover(ticker):
+    last_business_day = find_latest_business_day()
+    data = find_data(ticker=ticker, last_business_day=last_business_day)
+    turnover = data['Volume'] * data['Close']
+    return turnover
 
+
+@lru_cache(1000)
+def estimate_pct_of_median(ticker, trade_size_dkk=10_000):
+    # Returns the trading costs in bps (basis-points)
+    median_turnover = fetch_turnover(ticker).median()
+    if median_turnover < trade_size_dkk:
+        # To avoid dividing by zero
+        return 100
+    # Calculate what fraction of the median daily turnover the trade is
+    pct_of_median = (trade_size_dkk * 100) / median_turnover
+    return pct_of_median
+
+def get_liquid_tickers(pct_median_trade_limit, trade_size):
+    return ""
+
+
+@lru_cache(1000)
 def get_tickers_with_market_cap_limit(lower_percentile, upper_percentile):
     assert 0 <= lower_percentile <= 1
     assert 0 <= upper_percentile <= 1
